@@ -7,6 +7,8 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketAddress;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 //
 // This is an implementation of a simplified version of a command 
@@ -22,6 +24,10 @@ public class CSftp
     static Socket control;
     static DataOutputStream control_out;
     static BufferedReader control_in;
+
+    static Socket data;
+    static DataOutputStream data_out;
+    static BufferedReader data_in;
 
     public static void main(String [] args) {
         byte cmdString[] = new byte[MAX_LEN];
@@ -43,8 +49,7 @@ public class CSftp
             control_out = new DataOutputStream(control.getOutputStream());
             control_in = new BufferedReader(new InputStreamReader(control.getInputStream()));
 
-            Response resp = parseResponse(control_in.readLine());
-            printIn(resp.toString());
+            ctrlNext();
 
         } catch (IOException e) {
             System.out.println("error");
@@ -67,31 +72,34 @@ public class CSftp
                             printError(901);
                             break;
                         }
-                        sendString(String.format("USER %s", command[1]));
+                        user(command[1]);
                         break;
                     case "pw":
                         if (command.length != 2) {
                             printError(901);
                             break;
                         }
-                        sendString(String.format("PASS %s", command[1]));
+                        pw(command[1]);
                         break;
                     case "quit":
-                        sendString("QUIT");
-                        return;
+                        quit();
+                        break;
                     case "get":
                         if (command.length != 2) {
                             printError(901);
                             break;
                         }
+                        get(command[1]);
                         break;
                     case "cd":
                         if (command.length != 2) {
                             printError(901);
                             break;
                         }
+                        cd(command[1]);
                         break;
                     case "dir":
+                        dir();
                         break;
                     default:
                         printError(900);
@@ -103,15 +111,161 @@ public class CSftp
         }
     }
 
+    private static void user(String user) {
+        sendString(String.format("USER %s", user));
+
+        Response resp = ctrlNext();
+        switch (resp.code) {
+            case 230:
+                break;
+            case 331:
+            case 332:
+                break;
+            case 530:
+                break;
+        }
+    }
+
+    private static void pw(String pw) {
+        sendString(String.format("PASS %s", pw));
+
+        Response resp = ctrlNext();
+        switch (resp.code) {
+            case 230:
+                break;
+            case 202:
+                break;
+            case 332:
+                break;
+            case 503:
+                break;
+            case 530:
+                break;
+        }
+    }
+
+    private static void quit() {
+        sendString("QUIT");
+        ctrlNext();
+        System.exit(0);
+    }
+
+    private static void get(String filename) {
+        if (pasv()) {
+            sendString("TYPE I");
+            Response typeResp = ctrlNext();
+
+            sendString(String.format("RETR %s", filename));
+            Response resp = ctrlNext();    
+
+                        
+
+            ctrlNext();
+        } else {
+            // TODO: handle not conencted case
+        }
+    }
+
+    private static void cd(String dir) {
+        sendString(String.format("CWD %s", dir));
+
+        Response resp = ctrlNext();
+        switch(resp.code) {
+            case 200:
+            case 250:
+                break;
+            case 550:
+                break;
+        }
+    }
+
+    private static void dir() {
+
+        if (pasv()) {
+            sendString("LIST");
+            Response listResp = ctrlNext();
+
+            dataNext();
+
+            Response afterList = ctrlNext();
+        } else {
+            // TODO: handle not connected
+        }
+    }
+
+    // returns true if data connection is established
+    // false otherwise
+    private static boolean pasv() {
+        sendString("PASV");
+
+        Response resp = ctrlNext();
+        switch (resp.code) {
+            case 227:
+                Matcher matcher = Pattern.compile("[(](.*?)[)]").matcher(resp.message);
+                // TODO: fix
+                String[] ip_port = {"0", "0", "0", "0", "0", "1"};
+                if (matcher.find())
+                {
+                    ip_port = matcher.group(1).split(",");
+                }
+
+                String hostname = ip_port[0] + "." + ip_port[1] + "." + ip_port[2] + "." + ip_port[3];
+
+                int port = Integer.parseInt(ip_port[4]) * 256 + Integer.parseInt(ip_port[5]);
+
+                data = new Socket();
+
+                try {
+                    data.connect(new InetSocketAddress(hostname, port), 30000);
+                    data_out = new DataOutputStream(data.getOutputStream());
+                    data_in = new BufferedReader(new InputStreamReader(data.getInputStream()));
+                    return true;
+                } catch (IOException e) {
+                    // TODO: fix this
+                    printError(930);
+                    return false;
+                }
+        }
+        return false;
+    }
+
     private static void sendString(String str) {
         try {
             printOut(str);
-            control_out.writeBytes(str + "\n");
-            printIn(control_in.readLine());
+            control_out.writeBytes(str + "\r\n");
         } catch (IOException e) {
             printError(920, control.getInetAddress().toString(), control.getPort());
         }
     }
+
+    private static Response ctrlNext() {
+        try {
+            // TODO: fix this
+            Response next = parseResponse(control_in.readLine());
+            printIn(next.toString());
+            return next;
+        } catch (IOException e) {
+            printError(999);
+            return null;
+        }
+
+    }
+
+    private static String dataNext() {
+        try {
+            // TODO: fix this
+            String next;
+
+            while ((next = data_in.readLine()) != null) {
+                System.out.println(next);
+            }
+            return next;
+        } catch (IOException e) {
+            printError(999);
+            return null;
+        }
+    }
+
 
     private static Response parseResponse(String str) {
         String[] resp = str.split(" ", 2);

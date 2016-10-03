@@ -7,6 +7,6 @@ public class Response {
     }
 
     public String toString() {
-    	return Integer.toString(code) + message;
+    	return Integer.toString(code) + " " + message;
     }
 }
