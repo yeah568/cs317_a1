@@ -20,11 +20,11 @@ public class CSftp
     static final int ARG_CNT = 2;
 
     static Socket control;
+    static DataOutputStream control_out;
+    static BufferedReader control_in;
 
     public static void main(String [] args) {
         byte cmdString[] = new byte[MAX_LEN];
-
-
 
         // Get command line arguments and connected to FTP
         // If the arguments are invalid or there aren't enough of them
@@ -39,7 +39,15 @@ public class CSftp
         try {
             control = new Socket();
             control.connect(new InetSocketAddress(args[0], Integer.parseInt(args[1])), 30000);
+
+            control_out = new DataOutputStream(control.getOutputStream());
+            control_in = new BufferedReader(new InputStreamReader(control.getInputStream()));
+
+            Response resp = parseResponse(control_in.readLine());
+            printIn(resp.toString());
+
         } catch (IOException e) {
+            System.out.println("error");
             printError(920);
         }
 
@@ -51,9 +59,8 @@ public class CSftp
                     break;
                 // Start processing the command here.
 
-                System.out.println();
-                String[] command = new String(cmdString, "ASCII").trim().split("\\s+");
-
+                String[] command = new String(cmdString, "ASCII").trim().split("#")[0].trim().split("\\s+");
+                cmdString = new byte[MAX_LEN];
                 switch (command[0].toLowerCase()) {
                     case "user":
                         if (command.length != 2) {
@@ -67,9 +74,11 @@ public class CSftp
                             printError(901);
                             break;
                         }
+                        sendString(String.format("PASS %s", command[1]));
                         break;
                     case "quit":
-                        break;
+                        sendString("QUIT");
+                        return;
                     case "get":
                         if (command.length != 2) {
                             printError(901);
@@ -96,15 +105,25 @@ public class CSftp
 
     private static void sendString(String str) {
         try {
-            DataOutputStream out = new DataOutputStream(control.getOutputStream());
-            BufferedReader in = new BufferedReader(new InputStreamReader(control.getInputStream()));
-
-
-            out.writeBytes(str + "\n");
-            System.out.println(in.readLine());
+            printOut(str);
+            control_out.writeBytes(str + "\n");
+            printIn(control_in.readLine());
         } catch (IOException e) {
             printError(920, control.getInetAddress().toString(), control.getPort());
         }
+    }
+
+    private static Response parseResponse(String str) {
+        String[] resp = str.split(" ", 2);
+        return new Response(Integer.parseInt(resp[0]), resp[1]);            
+    }
+
+    private static void printIn(String str) {
+        System.out.println(String.format("<-- %s", str));
+    }
+
+    private static void printOut(String str) {
+        System.out.println(String.format("--> %s", str));
     }
 
     private static void printError(int code) {
