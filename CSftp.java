@@ -56,15 +56,31 @@ public class CSftp
 
                 switch (command[0].toLowerCase()) {
                     case "user":
-                        sendString("USER anonymous");
+                        if (command.length != 2) {
+                            printError(901);
+                            break;
+                        }
+                        sendString(String.format("USER %s", command[1]));
                         break;
                     case "pw":
+                        if (command.length != 2) {
+                            printError(901);
+                            break;
+                        }
                         break;
                     case "quit":
                         break;
                     case "get":
+                        if (command.length != 2) {
+                            printError(901);
+                            break;
+                        }
                         break;
                     case "cd":
+                        if (command.length != 2) {
+                            printError(901);
+                            break;
+                        }
                         break;
                     case "dir":
                         break;
