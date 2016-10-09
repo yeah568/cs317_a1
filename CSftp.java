@@ -15,7 +15,6 @@ import java.util.regex.Matcher;
 // line ftp client. The program always takes two arguments
 //
 
-
 public class CSftp
 {
     static final int MAX_LEN = 255;
@@ -49,7 +48,6 @@ public class CSftp
             control_out = new DataOutputStream(control.getOutputStream());
             control_in = new BufferedReader(new InputStreamReader(control.getInputStream()));
 
-            // 220 response on connect
             Response resp = ctrlNext();
 
             switch (resp.code) {
@@ -62,13 +60,11 @@ public class CSftp
                     break;
                 case 421:
                     // service not available
-                    System.exit(0);
-                    printError(920, args[0], args[1]);
+                    handleError(920, args[0], args[1]);
                     break;
             }
-
         } catch (IOException e) {
-            printError(920, args[0], args[1]);
+            handleError(920, args[0], args[1]);
         }
 
         try {
@@ -79,61 +75,62 @@ public class CSftp
                     break;
                 // Start processing the command here.
 
-                String[] command = new String(cmdString, "ASCII").trim().split("#")[0].trim().split("\\s+");
+                String[] command = new String(cmdString, "ASCII").trim().split("#")[0].trim().split("\\s+", 2);
                 cmdString = new byte[MAX_LEN];
                 switch (command[0].toLowerCase()) {
                     case "user":
                         if (command.length != 2) {
-                            printError(901);
+                            handleError(901);
                             break;
                         }
                         user(command[1]);
                         break;
                     case "pw":
                         if (command.length != 2) {
-                            printError(901);
+                            handleError(901);
                             break;
                         }
                         pw(command[1]);
                         break;
                     case "quit":
                         if (command.length != 1) {
-                            printError(901);
+                            handleError(901);
                             break;
                         }
                         quit();
                         break;
                     case "get":
                         if (command.length != 2) {
-                            printError(901);
+                            handleError(901);
                             break;
                         }
                         get(command[1]);
                         break;
                     case "cd":
                         if (command.length != 2) {
-                            printError(901);
+                            handleError(901);
                             break;
                         }
                         cd(command[1]);
                         break;
                     case "dir":
                         if (command.length != 1) {
-                            printError(901);
+                            handleError(901);
                             break;
                         }
                         dir();
                         break;
                     default:
-                        printError(900);
+                        handleError(900);
                         break;
                 }
             }
         } catch (IOException exception) {
-            printError(998);
+            handleError(998);
         }
     }
 
+    // sends username.
     private static void user(String user) {
         sendString(String.format("USER %s", user));
 
@@ -149,6 +146,8 @@ public class CSftp
         }
     }
 
+    // sends password.
+    // probably shouldn't use this with your actual password.
     private static void pw(String pw) {
         sendString(String.format("PASS %s", pw));
 
@@ -167,12 +166,17 @@ public class CSftp
         }
     }
 
+    // exits the program.
     private static void quit() {
         sendString("QUIT");
         ctrlNext();
         System.exit(0);
     }
 
+    // saves a file to local disk
+    // will save the file to the exact same name as the remote
+    // file. eg. remote.pdf will be saved to ./remote.pdf, ./dir/a.pdf will
+    // similarly create a folder locally
     private static void get(String filename) {
         if (pasv()) {
             sendString("TYPE I");
@@ -185,7 +189,7 @@ public class CSftp
             try {
                 fileOut = new FileOutputStream(filename);
             } catch (IOException e) {
-                printError(910, filename);
+                handleError(910, filename);
                 return;
             }
 
@@ -199,7 +203,7 @@ public class CSftp
 
                 fileOut.close();
             } catch (IOException e) {
-                printError(910, filename);
+                handleError(910, filename);
                 return;
             }
 
@@ -209,6 +213,7 @@ public class CSftp
         }
     }
 
+    // change directory
     private static void cd(String dir) {
         sendString(String.format("CWD %s", dir));
 
@@ -222,6 +227,7 @@ public class CSftp
         }
     }
 
+    // get directory listing
     private static void dir() {
         if (pasv()) {
             sendString("LIST");
@@ -234,13 +240,17 @@ public class CSftp
                 case 450:
                     // Requested file action not taken.
                     // File unavailable (e.g., file busy).
-
                     break;
                 case 500:
+                    break;
+                case 125:
+                    // Data connection already open; Transfer starting.
+                    // proceed to saving data
+                    dataPrint();
+                    break;
 
             }
 
-            dataNext();
 
             Response afterList = ctrlNext();
         } else {
@@ -248,6 +258,7 @@ public class CSftp
         }
     }
 
+    // enter passive mode and establish data connection.
     // returns true if data connection is established
     // false otherwise
     private static boolean pasv() {
@@ -262,7 +273,7 @@ public class CSftp
                 {
                     ip_port = matcher.group(1).split(",");
                 } else {
-                    printError(999, "Could not detect IP address and port for data connection.");
+                    handleError(999, "Could not detect IP address and port for data connection.");
                     return false;
                 }
 
@@ -278,29 +289,25 @@ public class CSftp
                     data_in = new BufferedReader(new InputStreamReader(data.getInputStream()));
                     return true;
                 } catch (IOException e) {
-                    // TODO: fix this
-                    printError(930, hostname, Integer.toString(port));
+                    handleError(930, hostname, Integer.toString(port));
                     return false;
                 }
         }
         return false;
     }
 
+    // sends a string over the control socket.
     private static void sendString(String str) {
         try {
             printOut(str);
             control_out.writeBytes(str + "\r\n");
         } catch (IOException e) {
-            printError(925);
-            try {
-                control.close();    
-            } catch (IOException closeException) {
-                printError(999, "Failed to close socket");
-            }
-            System.exit(1);
+            handleError(925);
         }
     }
 
+    // get next valid response from control socket.
+    // Will print out a multiline response.
     private static Response ctrlNext() {
         try {
             String s = control_in.readLine();
@@ -326,18 +333,15 @@ public class CSftp
             printIn(next.toString());
             return next;
         } catch (IOException e) {
-            printError(925);
-            try {
-                control.close();    
-            } catch (IOException closeException) {
-                printError(999, "Failed to close socket");
-            }
-            System.exit(1);
+
+            handleError(925);
             return null;
         }
     }
 
-    private static String dataNext() {
+    // print out everything on data socket to stdout
+    // until the connection is closed
+    private static String dataPrint() {
         try {
             String next;
 
@@ -346,13 +350,12 @@ public class CSftp
             }
             return next;
         } catch (IOException e) {
-            printError(935);
+            handleError(935);
             try {
                 data.close();    
             } catch (IOException closeException) {
-                printError(999, "Failed to close socket");
+                handleError(999, "Failed to close socket");
             }
-            System.exit(1);
             return null;
         }
     }
@@ -371,7 +374,7 @@ public class CSftp
         System.out.println(String.format("--> %s", str));
     }
 
-    private static void printError(int code) {
+    private static void handleError(int code) {
         switch (code) {
             case 900:
                 System.out.println("900 Invalid command.");
@@ -381,6 +384,12 @@ public class CSftp
                 break;
             case 925:
                 System.out.println("925 Control connection I/O error, closing control connection.");
+                try {
+                    control.close();
+                } catch (IOException closeException) {
+                    handleError(999, "Failed to close control socket");
+                }
+                System.exit(1);
                 break;
             case 935:
                 System.out.println("935 Data transfer connection I/O error, closing data connection.");
@@ -391,7 +400,7 @@ public class CSftp
         }
     }
 
-    private static void printError(int code, String msg) {
+    private static void handleError(int code, String msg) {
         switch (code) {
             case 910:
                 System.out.println(String.format("910 Access to local file %s denied.", msg));
@@ -402,10 +411,11 @@ public class CSftp
         }
     }
 
-    private static void printError(int code, String hostname, String port) {
+    private static void handleError(int code, String hostname, String port) {
         switch (code) {
             case 920:
                 System.out.println(String.format("920 Control connection to %s on port %s failed to open", hostname, port));
+                System.exit(1);
                 break;
             case 930:
                 System.out.println(String.format("930 Data transfer connection to %s on port %s failed to open.", hostname, port));
