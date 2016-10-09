@@ -302,10 +302,6 @@ public class CSftp
                     handleCommonResponse(listResp.code);
                     break;
             }
-
-
-        } else {
-            // TODO: handle not connected
         }
     }
 
