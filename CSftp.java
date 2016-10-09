@@ -18,16 +18,16 @@ import java.util.regex.Matcher;
 
 public class CSftp
 {
-    static final int MAX_LEN = 255;
-    static final int ARG_CNT = 2;
+    private static final int MAX_LEN = 255;
+    private static final int ARG_CNT = 2;
 
-    static Socket control;
-    static DataOutputStream control_out;
-    static BufferedReader control_in;
+    private static Socket control;
+    private static DataOutputStream control_out;
+    private static BufferedReader control_in;
 
-    static Socket data;
-    static DataOutputStream data_out;
-    static BufferedReader data_in;
+    private static Socket data;
+    private static DataOutputStream data_out;
+    private static BufferedReader data_in;
 
     public static void main(String [] args) {
         byte cmdString[] = new byte[MAX_LEN];
@@ -425,14 +425,11 @@ public class CSftp
     private static void handleCommonResponse(int code) {
         switch (code) {
             case 500: // Syntax error, command unrecognized. This may include errors such as command line too long.
-                break;
             case 501: // Syntax error in parameters or arguments.
-                break;
             case 503: // Bad sequence of commands.
-                break;
             case 530: // Not logged in.
-                break;
             case 550: // Requested action not taken. File unavailable (e.g., file not found, no access).
+                // don't do anything, user should send next command
                 break;
             case 421: // Service not available, closing control connection. This may be a reply to any command if the service knows it must shut down.
                 handleError(925);
