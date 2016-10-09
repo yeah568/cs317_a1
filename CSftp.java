@@ -1,4 +1,3 @@
-
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.OutputStream;
@@ -228,6 +227,19 @@ public class CSftp
             sendString("LIST");
             Response listResp = ctrlNext();
 
+            switch (listResp.code) {
+                case 150:
+                    // File status okay; about to open data connection
+                    break;
+                case 450:
+                    // Requested file action not taken.
+                    // File unavailable (e.g., file busy).
+
+                    break;
+                case 500:
+
+            }
+
             dataNext();
 
             Response afterList = ctrlNext();
@@ -245,11 +257,13 @@ public class CSftp
         switch (resp.code) {
             case 227:
                 Matcher matcher = Pattern.compile("[(](.*?)[)]").matcher(resp.message);
-                // TODO: fix
-                String[] ip_port = {"0", "0", "0", "0", "0", "1"};
+                String[] ip_port;
                 if (matcher.find())
                 {
                     ip_port = matcher.group(1).split(",");
+                } else {
+                    printError(999, "Could not detect IP address and port for data connection.");
+                    return false;
                 }
 
                 String hostname = ip_port[0] + "." + ip_port[1] + "." + ip_port[2] + "." + ip_port[3];
@@ -325,7 +339,6 @@ public class CSftp
 
     private static String dataNext() {
         try {
-            // TODO: fix this
             String next;
 
             while ((next = data_in.readLine()) != null) {
