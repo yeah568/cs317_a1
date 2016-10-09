@@ -4,12 +4,10 @@ import java.io.DataOutputStream;
 import java.io.OutputStream;
 import java.io.FileOutputStream;
 import java.io.InputStreamReader;
-import java.io.PrintWriter;
 import java.lang.System;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.net.SocketAddress;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
 
@@ -37,7 +35,7 @@ public class CSftp
 
         // Get command line arguments and connected to FTP
         // If the arguments are invalid or there aren't enough of them
-            // then exit.
+        // then exit.
 
         if (args.length != ARG_CNT) {
             System.out.print("Usage: cmd ServerAddress ServerPort\n");
@@ -52,10 +50,25 @@ public class CSftp
             control_out = new DataOutputStream(control.getOutputStream());
             control_in = new BufferedReader(new InputStreamReader(control.getInputStream()));
 
-            ctrlNext();
+            // 220 response on connect
+            Response resp = ctrlNext();
+
+            switch (resp.code) {
+                case 220:
+                    // all good and ready to go
+                    break;
+                case 120:
+                    // service ready in nnn minutes
+
+                    break;
+                case 421:
+                    // service not available
+                    System.exit(0);
+                    printError(920, args[0], args[1]);
+                    break;
+            }
 
         } catch (IOException e) {
-            System.out.println("error");
             printError(920, args[0], args[1]);
         }
 
@@ -191,7 +204,6 @@ public class CSftp
                 return;
             }
 
-
             ctrlNext();
         } else {
             // TODO: handle not conencted case
@@ -277,8 +289,26 @@ public class CSftp
 
     private static Response ctrlNext() {
         try {
-            // TODO: fix this
-            Response next = parseResponse(control_in.readLine());
+            String s = control_in.readLine();
+
+            // if a "-" follows the code, it is multiline response
+            // The response ends when the same status code appears,
+            // with s apace after it.
+            if (s.substring(3, 4).equals("-")) {
+                printIn(s);
+
+                String code = s.substring(0,3);
+                s = control_in.readLine();
+                // keep printing lines until end of multiline
+                // response is reached
+                while (!(s.substring(0,3).equals(code) &&
+                        s.substring(3,4).equals(" "))) {
+                    printIn(s);
+                    s = control_in.readLine();
+                }
+            }
+
+            Response next = parseResponse(s);
             printIn(next.toString());
             return next;
         } catch (IOException e) {
@@ -299,7 +329,7 @@ public class CSftp
             String next;
 
             while ((next = data_in.readLine()) != null) {
-                System.out.println(next);
+                printIn(next);
             }
             return next;
         } catch (IOException e) {
@@ -316,7 +346,7 @@ public class CSftp
 
 
     private static Response parseResponse(String str) {
-        String[] resp = str.split(" ", 2);
+        String[] resp = str.trim().split(" ", 2);
         return new Response(Integer.parseInt(resp[0]), resp[1]);            
     }
 
@@ -362,10 +392,10 @@ public class CSftp
     private static void printError(int code, String hostname, String port) {
         switch (code) {
             case 920:
-                System.out.println(String.format("920 Control connection to %s on port %d failed to open", hostname, port));
+                System.out.println(String.format("920 Control connection to %s on port %s failed to open", hostname, port));
                 break;
             case 930:
-                System.out.println(String.format("930 Data transfer connection to %s on port %d failed to open.", hostname, port));
+                System.out.println(String.format("930 Data transfer connection to %s on port %s failed to open.", hostname, port));
                 break;
         }
     }
