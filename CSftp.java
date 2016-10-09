@@ -52,15 +52,11 @@ public class CSftp
             Response resp = ctrlNext();
 
             switch (resp.code) {
-                case 220:
-                    // all good and ready to go
+                case 220: // Service ready for new user.
+                    // all good!
                     break;
-                case 120:
-                    // service ready in nnn minutes
-
-                    break;
-                case 421:
-                    // service not available
+                case 120: // Service ready in nnn minutes.
+                case 421: // Service not available, closing control connection.
                     handleError(920, args[0], args[1]);
                     break;
             }
@@ -175,48 +171,63 @@ public class CSftp
         System.exit(0);
     }
 
+    // set data type to binary
+    private static boolean type() {
+        sendString("TYPE I");
+        Response resp = ctrlNext();
+        switch (resp.code) {
+            case 200: // Command okay.
+                // all good!
+                return true;
+            default: // 500, 501, 504, 421, 530
+                handleCommonResponse(resp.code);
+                return false;
+        }
+    }
+
     // saves a file to local disk
     // will save the file to the exact same name as the remote
     // file. eg. remote.pdf will be saved to ./remote.pdf, ./dir/a.pdf will
     // similarly create a folder locally
     private static void get(String filename) {
         if (pasv()) {
-            sendString("TYPE I");
-            Response typeResp = ctrlNext();
+            if (type()) {
+                sendString(String.format("RETR %s", filename));
+                Response resp = ctrlNext();
 
-            sendString(String.format("RETR %s", filename));
-            Response resp = ctrlNext();
-
-            switch (resp.code) {
-                case 125: // Data connection already open; transfer starting.
-                case 150: // File status okay; about to open data connection.
-                    saveFile(filename);
-                    Response afterDataResp = ctrlNext();
-                    switch (afterDataResp.code) {
-                        case 226: // Closing data connection. Requested file action successful (for example, file transfer or file abort).
-                        case 250: // Requested file action okay, completed.
-                            // all good!
-                            break;
-                        case 425: // Can't open data connection.
-                        case 426: // Connection closed; transfer aborted.
-                        case 451: // Requested action aborted. Local error in processing.
-                            handleError(935);
-                            break;
-                    }
-                    break;
-                case 450: // Requested file action not taken. File unavailable (e.g., file busy).
-                case 550: // Requested action not taken. File unavailable (e.g., file not found, no access).
-                    handleError(935);
-                    break;
-                default: // 500, 501, 421, 530
-                    handleCommonResponse(resp.code);
-                    break;
+                switch (resp.code) {
+                    case 125: // Data connection already open; transfer starting.
+                    case 150: // File status okay; about to open data connection.
+                        saveFile(filename);
+                        Response afterDataResp = ctrlNext();
+                        switch (afterDataResp.code) {
+                            case 226: // Closing data connection. Requested file action successful (for example, file transfer or file abort).
+                            case 250: // Requested file action okay, completed.
+                                // all good!
+                                break;
+                            case 425: // Can't open data connection.
+                            case 426: // Connection closed; transfer aborted.
+                            case 451: // Requested action aborted. Local error in processing.
+                                handleError(935);
+                                break;
+                        }
+                        break;
+                    case 450: // Requested file action not taken. File unavailable (e.g., file busy).
+                    case 550: // Requested action not taken. File unavailable (e.g., file not found, no access).
+                        handleError(935);
+                        break;
+                    default: // 500, 501, 421, 530
+                        handleCommonResponse(resp.code);
+                        break;
+                }
+            } else {
+                // binary type set failed
+                handleError(935);
             }
-        } else {
-            // TODO: handle not conencted case
         }
     }
 
+    // saves data on existing data socket to filename
     private static void saveFile(String filename) {
         OutputStream fileOut;
         try {
@@ -337,6 +348,7 @@ public class CSftp
                 handleCommonResponse(resp.code);
                 break;
         }
+        handleError(930);
         return false;
     }
 
@@ -372,12 +384,9 @@ public class CSftp
                     s = control_in.readLine();
                 }
             }
-
-            Response next = parseResponse(s);
-            printIn(next.toString());
-            return next;
+            printIn(s);
+            return parseResponse(s);
         } catch (IOException e) {
-
             handleError(925);
             return null;
         }
