@@ -7,6 +7,7 @@ import java.lang.System;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.util.Arrays;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
 
@@ -136,12 +137,14 @@ public class CSftp
 
         Response resp = ctrlNext();
         switch (resp.code) {
-            case 230:
+            case 230: // User logged in, proceed.
+            case 530: // Not logged in.
+            case 331: // User name okay, need password.
+            case 332: // Need account for login.
+                // OK to not do anything. User should send next command.
                 break;
-            case 331:
-            case 332:
-                break;
-            case 530:
+            default: // 500, 501, 421
+                handleCommonResponse(resp.code);
                 break;
         }
     }
@@ -153,15 +156,14 @@ public class CSftp
 
         Response resp = ctrlNext();
         switch (resp.code) {
-            case 230:
+            case 230: // User logged in, proceed.
+            case 202: // Command not implemented, superfluous at this site.
+            case 530: // Not logged in.
+            case 332: // Need account for login.
+                // OK to not do anything. User should send next command.
                 break;
-            case 202:
-                break;
-            case 332:
-                break;
-            case 503:
-                break;
-            case 530:
+            default: // 500, 501, 503, 421
+                handleCommonResponse(resp.code);
                 break;
         }
     }
@@ -183,35 +185,62 @@ public class CSftp
             Response typeResp = ctrlNext();
 
             sendString(String.format("RETR %s", filename));
-            Response resp = ctrlNext();    
+            Response resp = ctrlNext();
 
-            OutputStream fileOut;
-            try {
-                fileOut = new FileOutputStream(filename);
-            } catch (IOException e) {
-                handleError(910, filename);
-                return;
+            switch (resp.code) {
+                case 125: // Data connection already open; transfer starting.
+                case 150: // File status okay; about to open data connection.
+                    saveFile(filename);
+                    Response afterDataResp = ctrlNext();
+                    switch (afterDataResp.code) {
+                        case 226: // Closing data connection. Requested file action successful (for example, file transfer or file abort).
+                        case 250: // Requested file action okay, completed.
+                            // all good!
+                            break;
+                        case 425: // Can't open data connection.
+                        case 426: // Connection closed; transfer aborted.
+                        case 451: // Requested action aborted. Local error in processing.
+                            handleError(935);
+                            break;
+                    }
+                    break;
+                case 450: // Requested file action not taken. File unavailable (e.g., file busy).
+                case 550: // Requested action not taken. File unavailable (e.g., file not found, no access).
+                    handleError(935);
+                    break;
+                default: // 500, 501, 421, 530
+                    handleCommonResponse(resp.code);
+                    break;
             }
-
-            byte[] bytes = new byte[16*1024];
-
-            int count;
-            try {
-                while ((count = data.getInputStream().read(bytes)) > 0) {
-                    fileOut.write(bytes, 0, count);
-                }
-
-                fileOut.close();
-            } catch (IOException e) {
-                handleError(910, filename);
-                return;
-            }
-
-            ctrlNext();
         } else {
             // TODO: handle not conencted case
         }
     }
+
+    private static void saveFile(String filename) {
+        OutputStream fileOut;
+        try {
+            fileOut = new FileOutputStream(filename);
+        } catch (IOException e) {
+            handleError(910, filename);
+            return;
+        }
+
+        byte[] bytes = new byte[16*1024];
+
+        int count;
+        try {
+            while ((count = data.getInputStream().read(bytes)) > 0) {
+                fileOut.write(bytes, 0, count);
+            }
+
+            fileOut.close();
+        } catch (IOException e) {
+            handleError(910, filename);
+            return;
+        }
+    }
+
 
     // change directory
     private static void cd(String dir) {
@@ -219,10 +248,12 @@ public class CSftp
 
         Response resp = ctrlNext();
         switch(resp.code) {
-            case 200:
-            case 250:
+            case 200: // Command okay.
+            case 250: // Requested file action okay, completed.
+                // all good!
                 break;
-            case 550:
+            default: // 500, 501, 502, 421, 530, 550
+                handleCommonResponse(resp.code);
                 break;
         }
     }
@@ -234,25 +265,34 @@ public class CSftp
             Response listResp = ctrlNext();
 
             switch (listResp.code) {
-                case 150:
-                    // File status okay; about to open data connection
-                    break;
-                case 450:
-                    // Requested file action not taken.
-                    // File unavailable (e.g., file busy).
-                    break;
-                case 500:
-                    break;
-                case 125:
-                    // Data connection already open; Transfer starting.
-                    // proceed to saving data
+                case 125: // Data connection already open; Transfer starting.
+                case 150: // File status okay; about to open data connection
+                    // proceed to printing data
                     dataPrint();
-                    break;
 
+                    Response afterList = ctrlNext();
+                    switch (afterList.code) {
+                        case 226: // Closing data connection. Requested file action successful (for example, file transfer or file abort).
+                        case 250: // Requested file action okay, completed.
+                            // all good!
+                            break;
+                        case 425: // Can't open data connection.
+                        case 426: // Connection closed; transfer aborted.
+                        case 451: // Requested action aborted. Local error in processing.
+                            handleError(935);
+                            break;
+                    }
+
+                    break;
+                case 450: // Requested file action not taken. File unavailable (e.g., file busy).
+                    handleError(935);
+                    break;
+                default: // 500, 501, 502, 421, 530
+                    handleCommonResponse(listResp.code);
+                    break;
             }
 
 
-            Response afterList = ctrlNext();
         } else {
             // TODO: handle not connected
         }
@@ -266,7 +306,7 @@ public class CSftp
 
         Response resp = ctrlNext();
         switch (resp.code) {
-            case 227:
+            case 227: // Entering Passive Mode (h1,h2,h3,h4,p1,p2).
                 Matcher matcher = Pattern.compile("[(](.*?)[)]").matcher(resp.message);
                 String[] ip_port;
                 if (matcher.find())
@@ -292,6 +332,10 @@ public class CSftp
                     handleError(930, hostname, Integer.toString(port));
                     return false;
                 }
+
+            default: // 500, 501, 502, 421, 530
+                handleCommonResponse(resp.code);
+                break;
         }
         return false;
     }
@@ -307,7 +351,7 @@ public class CSftp
     }
 
     // get next valid response from control socket.
-    // Will print out a multiline response.
+    // Will also print out the response, including a multiline response.
     private static Response ctrlNext() {
         try {
             String s = control_in.readLine();
@@ -363,7 +407,32 @@ public class CSftp
 
     private static Response parseResponse(String str) {
         String[] resp = str.trim().split(" ", 2);
+
+        // dirty hack to account for responses with no message
+        // eg. 220 on ftp.swfwmd.state.fl.us
+        if (resp.length != 2) {
+            resp = Arrays.copyOf(resp, resp.length + 1);
+            resp[1] = "";
+        }
         return new Response(Integer.parseInt(resp[0]), resp[1]);            
+    }
+
+    private static void handleCommonResponse(int code) {
+        switch (code) {
+            case 500: // Syntax error, command unrecognized. This may include errors such as command line too long.
+                break;
+            case 501: // Syntax error in parameters or arguments.
+                break;
+            case 503: // Bad sequence of commands.
+                break;
+            case 530: // Not logged in.
+                break;
+            case 550: // Requested action not taken. File unavailable (e.g., file not found, no access).
+                break;
+            case 421: // Service not available, closing control connection. This may be a reply to any command if the service knows it must shut down.
+                handleError(925);
+                break;
+        }
     }
 
     private static void printIn(String str) {
